@@ -1,0 +1,250 @@
+---
+title: "Car Sales Price Analysis"
+output:
+  html_document:
+---
+# 1. Problem Statement
+Given dataset most of them are used cars so it opens the possibility to analyze features related to car sales.
+
+<center>
+
+![](`r "car_price.jpg"`)
+
+</center>
+
+## 1.1 Background Information
+
+The Car Sale Advertisements dataset represents fresh and real life data.It contains data for more than 9.5K cars sale in Ukraine. 
+
+
+# 2. Loading Packages and Libraries
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+
+# 3. Data Profiling
+## 3.1 Load dataset and Check the type of varibales
+
+```{r , echo=T}
+car_df <- read.csv("car_sales.csv", header = T, stringsAsFactors = T)
+
+str(car_df)
+```
+
+## 3.2 Content
+Dataset contains 9576 rows and 10 variables with essential meanings:
+
+car         : manufacturer brand
+price       : seller's price in advertisement (in USD)
+body        : car body type
+mileage     : as mentioned in advertisement ('000 Km)
+engV        : rounded engine volume ('000 cubic cm)
+engType     : type of fuel ("Other" in this case should be treated as NA)
+registration: whether car registered in Ukraine or not
+year        : year of production
+model       : specific model name
+drive       : drive type
+
+## 3.3 Sample Data
+```{r}
+head(car_df)
+```
+
+## 3.4 structure of the data
+
+```{r}
+glimpse(car_df)
+```
+
+## 3.5 Quick overview of dataset
+
+```{r}
+summary(car_df)
+```
+
+
+# 4 Data Normalization
+
+## 4.1 Remove new cars 
+
+ 
+```{r}
+df <- car_df %>% 
+      mutate(price = price/1000, # price in '000
+             age = as.numeric(format(Sys.Date(), "%Y")) - year, # age
+             annualRun = mileage/age) %>% 
+      filter(age != 0) # remove new cars
+```
+
+
+# 5. Study Questions
+
+* **Which car has the biggest average annual mileage? And what about average age?** 
+
+* **What is the distribution of year of production?**
+
+* **What about petrol and body type? Do they influence drivers mileage?**
+
+* **What is the distribution of engine volume?**
+
+
+
+
+# 6. Analyze Through Study Questions
+
+##6.1 Which car has the biggest average annual mileage? And what about average age?
+
+```{r}
+TopByProd <- df %>% 
+      group_by(car) %>% 
+      summarise(carNum = n(), medianRun = round(median(annualRun), 1), meanRun = round(mean(age), 1)) %>% 
+      arrange(desc(carNum)) %>% 
+      as.data.frame()
+head(TopByProd, 20)
+```
+
+It seems that VAZ (Soviet/Russian car manufacturer) has much lower annual mileage than other popular producers. On the other hand it has the biggest age in average. It is obvious that annual mileage falls while car is getting older. But let's check.
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=3}
+runByAge <- df %>%  
+      group_by(age) %>% 
+      summarise(carNum = n(), medianRun = median(annualRun), meanRun = mean(annualRun))
+
+ggplot(runByAge, aes(x = age, y = medianRun)) + geom_line(colour = "#66CC99") + 
+      geom_point(colour = "#66CC99", size = 2) + 
+      scale_x_continuous(breaks=seq(0, 50, 5), limits= c(0, 50)) +
+      ggtitle("Median mileage depending on car age")
+```
+
+A rule is quite obvious. There is a wide "plateau" for 7-18 years old cars at the level of 16'000 km per year. Than the level goes down.
+Let's check the mileage variance for age groups.
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=3}
+df <- mutate(df, ageGroup = ifelse(age<= 3, "a(<=3)", 
+                                   ifelse(3 < age & age <= 6, "b(4-6)",
+                                          ifelse(5 < age & age <= 10, "c(7-10)",
+                                                 ifelse(10 < age & age <= 15, "d(11-15)",
+                                                        ifelse(15 < age & age <= 20, "e(16-20)",
+                                                               ifelse(20 < age & age <= 30, "f(21-30)",
+                                                                      "g(30+)")))))))
+df$ageGroup <- as.factor(df$ageGroup)
+df <- arrange(df, ageGroup)
+table(df$ageGroup)
+ggplot(df, aes(x = ageGroup, y = annualRun, color = ageGroup)) + 
+      geom_boxplot() + ylim(0, 75) + theme(legend.position = "none")
+```
+
+As we see average values of mileage for VAZ are lower than 2nd quartile for all cars of this age. In this cars it is easy to "adjust" speedometer readings. And assumed that we got evidence of such massive manipulations.
+
+## 6.2 What is the distrubution of year of production?
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=3}
+ageDistr <- df %>% 
+      group_by(age, year) %>% 
+      summarise(carNum = n()) %>% 
+      arrange(age) %>% 
+      as.data.frame()
+
+ageDistr %>% 
+      filter(year > 1960) %>% 
+      ggplot(aes(x = year, y = carNum)) + geom_line() + geom_point() +
+      geom_area(fill = "blue", alpha = .2) + scale_x_continuous(breaks=seq(1960, 2015, 5))
+```
+
+There are two clear groups. The first one is relevant to post Soviet period growth with a burst after 2000. The second one is short recovery after 2008 crisis.
+
+It is interesting what are the oldest cars at the market. 
+
+```{r}
+oldest <- df %>%
+      group_by(car, model) %>% 
+      summarise(carNum = n(), AVyear = round(mean(year),0)) %>% 
+      arrange(AVyear) %>% 
+      as.data.frame()
+head(oldest, 20)
+```
+
+Mainly it is Soviet classics but at the same time you can buy stylish coupe Opel Manta from 1979!
+
+## 6.3 What about petrol and body type? Do they influence drivers mileage?
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=3}
+RunByEngine <- df[which(df$body != "van"),] %>% 
+      group_by(engType) %>% 
+      summarise(carNum = n(), medianRun = round(median(annualRun), 1), 
+                meanRun = round(mean(annualRun), 1), avAge = round(mean(age), 1)) %>% 
+      arrange(desc(carNum)) %>% 
+      as.data.frame()
+RunByEngine
+```
+
+Excluded vans because they are mainly diesels and are often used as commercial transport. Anyway we see Diesel engines have consistently bigger annual mileage. Though they are some younger than other types.
+Let's check distributions.
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=3}
+ggplot(df[which(df$body != "van"),], aes(x = engType, y = annualRun, color = engType)) +
+      geom_boxplot() + ylim(0, 75) + theme(legend.position = "none")
+
+ggplot(df[which(df$body != "van"),], aes(x = engType, y = age, color = engType)) +
+      geom_boxplot() + theme(legend.position = "none")
+```
+
+If you want you can check statistical significance between annual mileage of Diesel cars and others. But it looks like Diesel drivers are indeed tend to drive more.
+Also we can see that the cars which use gas as a fuel are mainly old ones. And it is clear because often people install gas equipment at old voracious petrol cars.
+
+## 6.4 What is the distribution of engine volume?
+
+First of all general distribution.
+
+```{r, echo=FALSE}
+df$engV[which(df$model == "Focus" & df$engV == 0.14)] <- 1.4
+df$engV <- ifelse (df$engV > 9, df$engV/10, df$engV) 
+```
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=3}
+df %>% 
+      ggplot(aes(x = engV)) + geom_histogram(binwidth=.25, colour="black") +
+      scale_x_continuous(breaks=seq(0, 6, 0.5), limits= c(0, 6))
+```
+
+Main engine volumes are clear to understand, the most popular one is 1.5-1.6 litres.
+Does the pattern differ across different engine types? Let's see.
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=3}
+df %>% 
+      filter(engType != "Other") %>% 
+      ggplot(aes(x=engV, fill = engType)) + 
+      geom_histogram(binwidth=.25, alpha=.5, colour="black", position="identity") +
+      scale_x_continuous(breaks=seq(0, 6, 0.5), limits= c(0, 6)) +
+      facet_grid(engType ~ .) + theme(legend.position = "none")
+```
+
+Indeed main part of diesel engines has 2l volume, while petrol as usual is just 1.5l. Gas engines have the same pattern as petrol because again they are just reworked petrol ones.
+
+It is also interesting to take a look at body type and engine volume relation.
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=3}
+ggplot(df, aes(x = body, y = engV, color = body)) + geom_boxplot() + 
+      theme(legend.position = "none")
+```
+
+Hatchbacks almost don't have variance - their engines gathered in 1.4-1.6 litters zone. Almost the same with vagons which often have 2l volume. While crossover engine volume can vary significantly.
+
+Let's glance at the number of offers by body type. Found sedan is the most popular.
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=3}
+df %>% 
+      group_by(body) %>% 
+      summarise(count = n()) %>% 
+      arrange(desc(count)) %>% 
+      as.data.frame()
+```
+
+
+#7. Final Analysis 
+
+Above analysis shows that the prices of car strongly depend on mileage, year of manufacturing and engine volume.
+
+The sales analysis also showed that people preferred a sedan with petrol engine.
+
+This shows that the company should produce petrol sedan to increase their chances of making profit.
